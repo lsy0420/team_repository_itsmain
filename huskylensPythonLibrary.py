@@ -1,385 +1,257 @@
-import ubinascii
+# =============================================
 
-import time
+#  색맹/색약 보조 색상 인식기
 
-from machine import UART, I2C, Pin
+#  HuskyLens (Color Recognition) + Pico
+
+#  IDE: Thonny / MicroPython
+
+#
+
+#  배선:
+
+#    HuskyLens SDA → GP6 (I2C1)
+
+#    HuskyLens SCL → GP7 (I2C1)
+
+#    HuskyLens VCC → VBUS (5V, 40번 핀)
+
+#    HuskyLens GND → GND
+
+# =============================================
 
  
 
-commandHeaderAndAddress = "55AA11"
+import time
 
-algorthimsByteID = {
+from machine import I2C, Pin
 
-    "ALGORITHM_OBJECT_TRACKING": "0100",
+ 
 
-    "ALGORITHM_FACE_RECOGNITION": "0000",
+# ── HuskyLens I2C 설정 ──────────────────────
 
-    "ALGORITHM_OBJECT_RECOGNITION": "0200",
+i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=100000)
 
-    "ALGORITHM_LINE_TRACKING": "0300",
+HL_ADDR = 0x32
 
-    "ALGORITHM_COLOR_RECOGNITION": "0400",
+ 
 
-    "ALGORITHM_TAG_RECOGNITION": "0500",
+# ── 색상 ID → 이름 매핑 ─────────────────────
 
-    "ALGORITHM_OBJECT_CLASSIFICATION": "0600"
+# HuskyLens에서 학습한 순서대로 ID가 붙어요.
+
+# 첫 번째 학습 = 1번, 두 번째 = 2번 ...
+
+# 본인이 학습시킨 색상 순서에 맞게 수정하세요!
+
+COLOR_MAP = {
+
+    1:  "빨간색 (Red)",
+
+    2:  "주황색 (Orange)",
+
+    3:  "노란색 (Yellow)",
+
+    4:  "초록색 (Green)",
+
+    5:  "파란색 (Blue)",
+
+    6:  "보라색 (Violet)",
+
+    7:  "흰색   (White)",
+
+    8:  "검은색 (Black)",
+
+    9:  "회색   (Gray)",
+
+    10: "갈색   (Brown)",
+
+    11: "분홍색 (Pink)",
+
+    12: "하늘색 (Sky Blue)",
 
 }
 
  
 
-COMMAND_REQUEST_CUSTOMNAMES = 0x2f
+# ── HuskyLens 패킷 유틸 ─────────────────────
 
-COMMAND_REQUEST_TAKE_PHOTO_TO_SD_CARD = 0x30
+def make_packet(cmd, data=None):
 
-COMMAND_REQUEST_SAVE_MODEL_TO_SD_CARD = 0x32
+    if data is None:
 
-COMMAND_REQUEST_LOAD_MODEL_FROM_SD_CARD = 0x33
+        data = []
 
-COMMAND_REQUEST_CUSTOM_TEXT = 0x34
+    body = [0x55, 0xAA, 0x11, len(data), cmd] + data
 
-COMMAND_REQUEST_CLEAR_TEXT = 0x35
+    body.append(sum(body) & 0xFF)
 
-COMMAND_REQUEST_LEARN_ONECE = 0x36
-
-COMMAND_REQUEST_FORGET = 0x37
-
-COMMAND_REQUEST_SCREENSHOT_TO_SD_CARD = 0x39
-
-COMMAND_REQUEST_FIRMWARE_VERSION = 0x3C
+    return bytes(body)
 
  
 
- 
+def read_bytes(n=20):
 
-class HuskyLensLibrary:
+    try:
 
-    def __init__(self, proto):
+        return list(i2c.readfrom(HL_ADDR, n))
 
-        self.proto = proto
+    except:
 
-        self.address = 0x32
-
-        if self.proto == "SERIAL":
-
-            # UART 모드: Pico UART0
-
-            # 파랑(허스키 TX) → GP1, 녹색(허스키 RX) → GP0
-
-            self.huskylensSer = UART(0, baudrate=9600, tx=Pin(0), rx=Pin(1), timeout=1000)
-
-            time.sleep(0.1)
-
-            while self.huskylensSer.any():
-
-                self.huskylensSer.read()
-
-        else:
-
-            # I2C 모드: Grove Shield I2C1 포트 (SDA=GP6, SCL=GP7), 50kHz
-
-            self.huskylensSer = I2C(1, scl=Pin(7), sda=Pin(6), freq=50000)
-
-        self.lastCmdSent = ""
+        return []
 
  
 
-    def writeToHuskyLens(self, cmd):
+# ── 연결 확인 (handshake) ───────────────────
 
-        self.lastCmdSent = cmd
+def handshake():
 
-        if self.proto == "SERIAL":
+    try:
 
-            self.huskylensSer.write(cmd)
+        i2c.writeto(HL_ADDR, make_packet(0x2C))
 
-        else:
+        time.sleep_ms(50)
 
-            self.huskylensSer.writeto(self.address, cmd)
+        r = read_bytes()
 
- 
+        return len(r) >= 2 and r[0] == 0x55 and r[1] == 0xAA
 
-    def calculateChecksum(self, hexStr):
+    except:
 
-        total = 0
-
-        for i in range(0, len(hexStr), 2):
-
-            total += int(hexStr[i:i + 2], 16)
-
-        hexStr = hex(total)[-2:]
-
-        return hexStr
+        return False
 
  
 
-    def cmdToBytes(self, cmd):
+# ── 인식된 블록 요청 ────────────────────────
 
-        return ubinascii.unhexlify(cmd)
+def get_blocks():
 
- 
+    blocks = []
 
-    def splitCommandToParts(self, str):
+    try:
 
-        headers = str[0:4]
+        i2c.writeto(HL_ADDR, make_packet(0x20))
 
-        address = str[4:6]
+        time.sleep_ms(50)
 
-        data_length = int(str[6:8], 16)
+        r = read_bytes(64)
 
-        command = str[8:10]
+    except:
 
-        if data_length > 0:
-
-            data = str[10:10 + data_length * 2]
-
-        else:
-
-            data = []
-
-        checkSum = str[2 * (6 + data_length - 1):2 * (6 + data_length - 1) + 2]
-
-        return [headers, address, data_length, command, data, checkSum]
+        return blocks
 
  
 
-    def getBlockOrArrowCommand(self):
+    idx = 0
 
-        if self.proto == "SERIAL":
+    while idx < len(r) - 5:
 
-            byteString = self.huskylensSer.read(5)
+        if r[idx] == 0x55 and r[idx+1] == 0xAA:
 
-            byteString += self.huskylensSer.read(int(byteString[3]))
+            length = r[idx+3]
 
-            byteString += self.huskylensSer.read(1)
+            cmd    = r[idx+4]
 
-        else:
+            # 0x2A = 블록 데이터 응답
 
-            byteString = self.huskylensSer.readfrom(self.address, 5)
+            if cmd == 0x2A and length == 10 and idx + 15 <= len(r):
 
-            byteString += self.huskylensSer.readfrom(self.address, byteString[3] + 1)
+                d = r[idx+5:idx+15]
 
-        commandSplit = self.splitCommandToParts(''.join(['%02x' % b for b in byteString]))
+                color_id = d[8] | (d[9] << 8)
 
-        return commandSplit[4]
+                blocks.append(color_id)
+
+                idx += 15
+
+                continue
+
+        idx += 1
+
+    return blocks
 
  
 
-    def processReturnData(self):
+# ── 색상 이름 가져오기 ──────────────────────
 
-        try:
+def get_name(color_id):
 
-            if self.proto == "SERIAL":
+    if color_id in COLOR_MAP:
 
-                byteString = self.huskylensSer.read(5)
+        return COLOR_MAP[color_id]
 
-                if byteString is None or len(byteString) < 5:
+    return "알 수 없는 색 (ID: " + str(color_id) + ")"
 
-                    print("Read error (응답 없음 - 배선/모드 확인 필요)")
+ 
 
-                    return []
+# ── 메인 실행 ───────────────────────────────
 
-                byteString += self.huskylensSer.read(int(byteString[3]))
+print("========================================")
 
-                byteString += self.huskylensSer.read(1)
+print("   색맹/색약 보조 색상 인식기")
+
+print("========================================")
+
+print("HuskyLens 연결 확인 중...")
+
+ 
+
+connected = False
+
+for i in range(5):
+
+    if handshake():
+
+        connected = True
+
+        print("연결 성공!")
+
+        break
+
+    print("재시도 " + str(i+1) + "/5...")
+
+    time.sleep_ms(500)
+
+ 
+
+if not connected:
+
+    print("연결 실패! 배선을 확인하세요.")
+
+    print("  SDA → GP6,  SCL → GP7")
+
+else:
+
+    print("색상 인식 시작\n")
+
+    prev = []
+
+ 
+
+    while True:
+
+        ids = get_blocks()
+
+ 
+
+        if ids != prev:
+
+            if not ids:
+
+                print("[---] 인식된 색상 없음")
 
             else:
 
-                byteString = self.huskylensSer.readfrom(self.address, 5)
+                print("[감지] " + str(len(ids)) + "개 색상:")
 
-                byteString += self.huskylensSer.readfrom(self.address, byteString[3] + 1)
+                for cid in ids:
 
-            commandSplit = self.splitCommandToParts(''.join(['%02x' % b for b in byteString]))
+                    print("  >> " + get_name(cid))
 
-            if commandSplit[3] == "2e":
+                print("")
 
-                return "Knock Recieved"
-
-            else:
-
-                returnData = []
-
-                numberOfBlocksOrArrow = int(
-
-                    commandSplit[4][2:4] + commandSplit[4][0:2], 16)
-
-                numberOfIDLearned = int(
-
-                    commandSplit[4][6:8] + commandSplit[4][4:6], 16)
-
-                frameNumber = int(
-
-                    commandSplit[4][10:12] + commandSplit[4][8:10], 16)
-
-                for i in range(numberOfBlocksOrArrow):
-
-                    returnData.append(self.getBlockOrArrowCommand())
-
-                finalData = []
-
-                tmp = []
-
-                for i in returnData:
-
-                    tmp = []
-
-                    for q in range(0, len(i), 4):
-
-                        tmp.append(int(i[q:q + 2], 16) + int(i[q + 2:q + 4], 16))
-
-                    finalData.append(tmp)
-
-                    tmp = []
-
-                return finalData
-
-        except Exception as e:
-
-            print("Read error:", e)
-
-            return []
+            prev = ids
 
  
 
-    def command_request_knock(self):
-
-        cmd = self.cmdToBytes(commandHeaderAndAddress + "002c3c")
-
-        self.writeToHuskyLens(cmd)
-
-        return self.processReturnData()
-
- 
-
-    def command_request_blocks(self):
-
-        cmd = self.cmdToBytes(commandHeaderAndAddress + "002131")
-
-        self.writeToHuskyLens(cmd)
-
-        return self.processReturnData()
-
- 
-
-    def command_request_arrows(self):
-
-        cmd = self.cmdToBytes(commandHeaderAndAddress + "002232")
-
-        self.writeToHuskyLens(cmd)
-
-        return self.processReturnData()
-
- 
-
-    def color_recognition_mode(self):
-
-        cmd = self.cmdToBytes(commandHeaderAndAddress + "022d040043")
-
-        self.writeToHuskyLens(cmd)
-
-        return self.processReturnData()
-
- 
-
-    def face_recognition_mode(self):
-
-        cmd = self.cmdToBytes(commandHeaderAndAddress + "022d00003f")
-
-        self.writeToHuskyLens(cmd)
-
-        return self.processReturnData()
-
- 
-
-    def object_tracking_mode(self):
-
-        cmd = self.cmdToBytes(commandHeaderAndAddress + "022d010040")
-
-        self.writeToHuskyLens(cmd)
-
-        return self.processReturnData()
-
- 
-
-    def object_recognition_mode(self):
-
-        cmd = self.cmdToBytes(commandHeaderAndAddress + "022d020041")
-
-        self.writeToHuskyLens(cmd)
-
-        return self.processReturnData()
-
- 
-
-    def tag_recognition_mode(self):
-
-        cmd = self.cmdToBytes(commandHeaderAndAddress + "022d050044")
-
-        self.writeToHuskyLens(cmd)
-
-        return self.processReturnData()
-
- 
-
-    def command_request_algorthim(self, alg):
-
-        if alg in algorthimsByteID:
-
-            cmd = commandHeaderAndAddress + "022d" + algorthimsByteID[alg]
-
-            cmd += self.calculateChecksum(cmd)
-
-            cmd = self.cmdToBytes(cmd)
-
-            self.writeToHuskyLens(cmd)
-
-            return self.processReturnData()
-
-        else:
-
-            print("INCORRECT ALGORITHIM NAME")
-
- 
-
-    def command_request_learn_once(self, id):
-
-        cmd = commandHeaderAndAddress
-
-        dataLength = 2
-
-        cmd += "{:02x}".format(dataLength)
-
-        cmd += "{:02x}".format(COMMAND_REQUEST_LEARN_ONECE)
-
-        id = [id & 0xff, (id >> 8) & 0xff]
-
-        cmd += "{:02x}".format(id[0])
-
-        cmd += "{:02x}".format(id[1])
-
-        cmd += self.calculateChecksum(cmd)
-
-        cmd = self.cmdToBytes(cmd)
-
-        self.writeToHuskyLens(cmd)
-
-        return self.processReturnData()
-
- 
-
-    def command_request_forget(self):
-
-        cmd = commandHeaderAndAddress
-
-        dataLength = 0
-
-        cmd += "{:02x}".format(dataLength)
-
-        cmd += "{:02x}".format(COMMAND_REQUEST_FORGET)
-
-        cmd += self.calculateChecksum(cmd)
-
-        cmd = self.cmdToBytes(cmd)
-
-        self.writeToHuskyLens(cmd)
-
-        return self.processReturnData()\
+        time.sleep_ms(300)

@@ -1,10 +1,8 @@
 # =============================================
 
-#  색맹/색약 보조 색상 인식기 - WEB SERVER
+#  색맹/색약 보조 색상 인식기 - 웹서버 버전
 
 #  HuskyLens (Color Recognition) + Pico W
-
-#  IDE: Thonny / MicroPython
 
 #
 
@@ -18,39 +16,23 @@
 
 #    HuskyLens GND -> GND
 
-#
-
-#  사용법:
-
-#    1. WIFI_SSID, WIFI_PASSWORD 를 본인 것으로 수정
-
-#    2. Pico W에 업로드 후 실행
-
-#    3. 시리얼 모니터에 뜨는 IP 주소를 브라우저에 입력
-
 # =============================================
 
  
-
-import time
 
 import network
 
 import socket
 
-import json
+import time
 
 from machine import I2C, Pin
 
  
 
-# ── Wi-Fi 설정 (여기만 수정!) ──────────────────
+WIFI_SSID = "여기에_와이파이_이름"
 
-WIFI_SSID     = "senWiFi_Free_sky"
-
-WIFI_PASSWORD = "sudo25sky@"
-
-# ──────────────────────────────────────────────
+WIFI_PASS = "여기에_와이파이_비밀번호"
 
  
 
@@ -58,77 +40,45 @@ i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=100000)
 
 HL_ADDR = 0x32
 
- 
-
-COLOR_MAP = {
-
-    1:  ("빨간색",   "#FF3B30"),
-
-    2:  ("주황색",   "#FF9500"),
-
-    3:  ("노란색",   "#FFCC00"),
-
-    4:  ("초록색",   "#34C759"),
-
-    5:  ("파란색",   "#007AFF"),
-
-    6:  ("보라색",   "#AF52DE"),
-
-    7:  ("흰색",     "#F2F2F7"),
-
-    8:  ("검은색",   "#1C1C1E"),
-
-    9:  ("회색",     "#8E8E93"),
-
-    10: ("갈색",     "#A2845E"),
-
-    11: ("분홍색",   "#FF2D55"),
-
-    12: ("하늘색",   "#5AC8FA"),
-
-}
-
- 
-
-MIN_AREA     = 2000
+MIN_AREA = 2000
 
 STABLE_COUNT = 3
 
  
 
-# ── 상태 변수 ──────────────────────────────────
+COLOR_MAP = {
 
-state = {
+    1:  {"name": "빨간색",  "en": "Red",      "hex": "#FF4444"},
 
-    "name":  "대기 중...",
+    2:  {"name": "주황색",  "en": "Orange",   "hex": "#FF8C00"},
 
-    "color": "#888888",
+    3:  {"name": "노란색",  "en": "Yellow",   "hex": "#FFD700"},
 
-    "id":    0,
+    4:  {"name": "초록색",  "en": "Green",    "hex": "#44BB44"},
 
-    "count": 0,
+    5:  {"name": "파란색",  "en": "Blue",     "hex": "#4488FF"},
+
+    6:  {"name": "보라색",  "en": "Violet",   "hex": "#9966FF"},
+
+    7:  {"name": "흰색",    "en": "White",    "hex": "#EEEEEE"},
+
+    8:  {"name": "검은색",  "en": "Black",    "hex": "#333333"},
+
+    9:  {"name": "회색",    "en": "Gray",     "hex": "#999999"},
+
+    10: {"name": "갈색",    "en": "Brown",    "hex": "#AA6633"},
+
+    11: {"name": "분홍색",  "en": "Pink",     "hex": "#FF88BB"},
+
+    12: {"name": "하늘색",  "en": "Sky Blue", "hex": "#66CCFF"},
 
 }
 
-prev_name     = ""
-
-candidate     = None
-
-candidate_cnt = 0
-
  
 
- 
+def get_info(cid):
 
-# ── HuskyLens 함수들 ───────────────────────────
-
-def get_name_color(color_id):
-
-    if color_id in COLOR_MAP:
-
-        return COLOR_MAP[color_id]
-
-    return ("알 수 없는 색", "#888888")
+    return COLOR_MAP.get(cid, {"name": "알 수 없음", "en": "Unknown", "hex": "#CCCCCC"})
 
  
 
@@ -146,36 +96,6 @@ def make_packet(cmd, data=None):
 
  
 
-def read_bytes(n=64):
-
-    try:
-
-        return list(i2c.readfrom(HL_ADDR, n))
-
-    except:
-
-        return []
-
- 
-
-def handshake():
-
-    try:
-
-        i2c.writeto(HL_ADDR, make_packet(0x2C))
-
-        time.sleep_ms(50)
-
-        r = read_bytes(20)
-
-        return len(r) >= 2 and r[0] == 0x55 and r[1] == 0xAA
-
-    except:
-
-        return False
-
- 
-
 def get_dominant_id():
 
     try:
@@ -184,7 +104,7 @@ def get_dominant_id():
 
         time.sleep_ms(50)
 
-        r = read_bytes(64)
+        r = list(i2c.readfrom(HL_ADDR, 64))
 
     except:
 
@@ -192,7 +112,7 @@ def get_dominant_id():
 
  
 
-    best_id   = None
+    best_id = None
 
     best_area = 0
 
@@ -206,27 +126,21 @@ def get_dominant_id():
 
             if length >= 8 and idx + 5 + length <= len(r):
 
-                d = r[idx+5 : idx+5+length]
+                d = r[idx+5: idx+5+length]
 
-                w        = d[4] | (d[5] << 8)
+                w = d[4] | (d[5] << 8)
 
-                h        = d[6] | (d[7] << 8)
+                h = d[6] | (d[7] << 8)
 
-                color_id = d[length-2] | (d[length-1] << 8)
+                cid = d[length-2] | (d[length-1] << 8)
 
-                area     = w * h
+                area = w * h
 
-                if area < MIN_AREA:
-
-                    idx += 5 + length + 1
-
-                    continue
-
-                if 1 <= color_id <= 50 and area > best_area:
+                if area >= MIN_AREA and 1 <= cid <= 50 and area > best_area:
 
                     best_area = area
 
-                    best_id   = color_id
+                    best_id = cid
 
             idx += 5 + length + 1
 
@@ -238,59 +152,45 @@ def get_dominant_id():
 
  
 
- 
+# 와이파이 연결
 
-# ── Wi-Fi 연결 ─────────────────────────────────
+wlan = network.WLAN(network.STA_IF)
 
-def connect_wifi():
+wlan.active(True)
 
-    wlan = network.WLAN(network.STA_IF)
+wlan.connect(WIFI_SSID, WIFI_PASS)
 
-    wlan.active(True)
+print("와이파이 연결 중...")
 
-    wlan.connect(WIFI_SSID, WIFI_PASSWORD)
+for _ in range(30):
 
-    print("Wi-Fi 연결 중", end="")
+    if wlan.isconnected():
 
-    for _ in range(20):
+        break
 
-        if wlan.isconnected():
-
-            print()
-
-            print("Wi-Fi 연결 성공!")
-
-            print("IP 주소:", wlan.ifconfig()[0])
-
-            return wlan.ifconfig()[0]
-
-        print(".", end="")
-
-        time.sleep(1)
-
-    print()
-
-    print("Wi-Fi 연결 실패!")
-
-    return None
+    time.sleep(0.5)
 
  
 
+if not wlan.isconnected():
+
+    print("와이파이 연결 실패!")
+
+    raise SystemExit
+
  
 
-# ── HTML 페이지 ────────────────────────────────
+ip = wlan.ifconfig()[0]
 
-HTML = """\
+print("IP: " + ip)
 
-HTTP/1.1 200 OK\r
+print("브라우저에서 http://" + ip + " 접속!")
 
-Content-Type: text/html; charset=utf-8\r
+ 
 
-Connection: close\r
+# HTML 페이지
 
-\r
-
-<!DOCTYPE html>
+HTML = """<!DOCTYPE html>
 
 <html lang="ko">
 
@@ -298,277 +198,41 @@ Connection: close\r
 
 <meta charset="UTF-8">
 
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 
 <title>색상 인식기</title>
 
 <style>
 
-  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
 
-  * { margin:0; padding:0; box-sizing:border-box; }
+body{font-family:'Apple SD Gothic Neo',sans-serif;background:#0d0d1a;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden}
 
-  body {
+canvas{position:fixed;top:0;left:0;pointer-events:none}
 
-    font-family: 'Noto Sans KR', sans-serif;
+.card{position:relative;z-index:2;background:rgba(255,255,255,0.06);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.12);border-radius:36px;padding:44px 52px;text-align:center;width:320px}
 
-    background: #0f0f1a;
+.top{font-size:13px;color:rgba(255,255,255,0.4);letter-spacing:2px;margin-bottom:28px}
 
-    min-height: 100vh;
+.circle-wrap{position:relative;width:160px;margin:0 auto 24px}
 
-    display: flex;
+.ring{position:absolute;inset:-14px;border-radius:50%;border:3px solid;opacity:0;animation:ring 2s ease-out infinite}
 
-    flex-direction: column;
+@keyframes ring{0%{transform:scale(1);opacity:.5}100%{transform:scale(1.4);opacity:0}}
 
-    align-items: center;
+.circle{width:160px;height:160px;border-radius:50%;transition:background .6s ease;display:flex;align-items:center;justify-content:center;font-size:48px}
 
-    justify-content: center;
+.name{font-size:42px;font-weight:900;color:white;margin-bottom:4px;transition:color .6s}
 
-    overflow: hidden;
+.en{font-size:16px;color:rgba(255,255,255,.35);margin-bottom:20px}
 
-  }
+.badge{display:inline-block;padding:8px 22px;border-radius:999px;font-size:13px;font-weight:700;letter-spacing:1px;transition:all .6s}
 
-  .bg-blobs {
+.dot{width:8px;height:8px;border-radius:50%;background:#44ff88;display:inline-block;margin-right:6px;animation:blink 1.5s ease infinite}
 
-    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
 
-  }
-
-  .blob {
-
-    position: absolute;
-
-    border-radius: 50%;
-
-    filter: blur(80px);
-
-    opacity: 0.18;
-
-    animation: float 8s ease-in-out infinite;
-
-  }
-
-  .blob1 { width:400px; height:400px; background:#FF3B30; top:-100px; left:-100px; animation-delay:0s; }
-
-  .blob2 { width:300px; height:300px; background:#007AFF; bottom:-80px; right:-80px; animation-delay:-3s; }
-
-  .blob3 { width:250px; height:250px; background:#AF52DE; top:40%; left:60%; animation-delay:-5s; }
-
-  @keyframes float {
-
-    0%,100% { transform: translateY(0) scale(1); }
-
-    50%      { transform: translateY(-30px) scale(1.05); }
-
-  }
-
- 
-
-  .card {
-
-    position: relative; z-index: 1;
-
-    background: rgba(255,255,255,0.06);
-
-    border: 1px solid rgba(255,255,255,0.12);
-
-    border-radius: 32px;
-
-    padding: 48px 40px 40px;
-
-    width: 340px;
-
-    text-align: center;
-
-    backdrop-filter: blur(20px);
-
-  }
-
-  h1 {
-
-    font-size: 15px;
-
-    font-weight: 700;
-
-    color: rgba(255,255,255,0.5);
-
-    letter-spacing: 0.15em;
-
-    text-transform: uppercase;
-
-    margin-bottom: 36px;
-
-  }
-
- 
-
-  .orb-wrap {
-
-    position: relative;
-
-    width: 200px; height: 200px;
-
-    margin: 0 auto 32px;
-
-  }
-
-  .orb-ring {
-
-    position: absolute; inset: -12px;
-
-    border-radius: 50%;
-
-    border: 2px solid transparent;
-
-    animation: spin 3s linear infinite;
-
-  }
-
-  .orb-ring::before {
-
-    content: '';
-
-    position: absolute; inset: -2px;
-
-    border-radius: 50%;
-
-    background: conic-gradient(from 0deg, transparent 70%, var(--c, #888) 100%);
-
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-
-    -webkit-mask-composite: xor;
-
-    mask-composite: exclude;
-
-    padding: 2px;
-
-  }
-
-  @keyframes spin { to { transform: rotate(360deg); } }
-
- 
-
-  .orb {
-
-    width: 200px; height: 200px;
-
-    border-radius: 50%;
-
-    background: var(--c, #888888);
-
-    transition: background 0.6s ease;
-
-    display: flex; align-items: center; justify-content: center;
-
-    font-size: 72px;
-
-    box-shadow:
-
-      0 0 40px color-mix(in srgb, var(--c, #888) 50%, transparent),
-
-      0 0 80px color-mix(in srgb, var(--c, #888) 25%, transparent);
-
-    animation: pulse 2s ease-in-out infinite;
-
-  }
-
-  @keyframes pulse {
-
-    0%,100% { transform: scale(1); box-shadow: 0 0 40px color-mix(in srgb, var(--c,#888) 50%, transparent), 0 0 80px color-mix(in srgb, var(--c,#888) 25%, transparent); }
-
-    50%      { transform: scale(1.04); box-shadow: 0 0 60px color-mix(in srgb, var(--c,#888) 70%, transparent), 0 0 120px color-mix(in srgb, var(--c,#888) 35%, transparent); }
-
-  }
-
- 
-
-  .color-name {
-
-    font-size: 36px;
-
-    font-weight: 900;
-
-    color: #ffffff;
-
-    letter-spacing: -0.02em;
-
-    margin-bottom: 8px;
-
-    transition: color 0.5s;
-
-    min-height: 48px;
-
-  }
-
-  .color-hex {
-
-    font-size: 14px;
-
-    color: rgba(255,255,255,0.4);
-
-    letter-spacing: 0.1em;
-
-    margin-bottom: 28px;
-
-    font-family: monospace;
-
-  }
-
- 
-
-  .status-bar {
-
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-
-    background: rgba(255,255,255,0.06);
-
-    border-radius: 100px;
-
-    padding: 10px 20px;
-
-    font-size: 13px;
-
-    color: rgba(255,255,255,0.5);
-
-  }
-
-  .dot {
-
-    width: 8px; height: 8px;
-
-    border-radius: 50%;
-
-    background: #34C759;
-
-    animation: blink 1.4s ease-in-out infinite;
-
-  }
-
-  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
-
- 
-
-  /* 팡팡 파티클 */
-
-  .particles { position: fixed; inset: 0; pointer-events: none; z-index: 99; }
-
-  .particle {
-
-    position: absolute;
-
-    border-radius: 50%;
-
-    animation: burst 0.8s ease-out forwards;
-
-  }
-
-  @keyframes burst {
-
-    0%   { transform: translate(0,0) scale(1); opacity: 1; }
-
-    100% { transform: translate(var(--tx), var(--ty)) scale(0); opacity: 0; }
-
-  }
+.status{margin-top:22px;font-size:12px;color:rgba(255,255,255,.35)}
 
 </style>
 
@@ -576,165 +240,121 @@ Connection: close\r
 
 <body>
 
-<div class="bg-blobs">
-
-  <div class="blob blob1"></div>
-
-  <div class="blob blob2"></div>
-
-  <div class="blob blob3"></div>
-
-</div>
-
- 
-
-<div class="particles" id="particles"></div>
-
- 
+<canvas id="c"></canvas>
 
 <div class="card">
 
-  <h1>&#127752; 색상 인식기</h1>
+  <div class="top"> 색상 인식기</div>
 
-  <div class="orb-wrap">
+  <div class="circle-wrap">
 
-    <div class="orb-ring" id="ring" style="--c:#888888"></div>
+    <div class="ring" id="ring"></div>
 
-    <div class="orb" id="orb" style="--c:#888888">&#128065;</div>
-
-  </div>
-
-  <div class="color-name" id="name">대기 중...</div>
-
-  <div class="color-hex" id="hex">#888888</div>
-
-  <div class="status-bar">
-
-    <div class="dot"></div>
-
-    <span>실시간 감지 중</span>
+    <div class="circle" id="circle"></div>
 
   </div>
+
+  <div class="name" id="name">대기 중...</div>
+
+  <div class="en" id="en">Waiting</div>
+
+  <div class="badge" id="badge" style="background:rgba(255,255,255,.08);color:rgba(255,255,255,.4)">#888888</div>
+
+  <div class="status"><span class="dot"></span>실시간 감지 중</div>
 
 </div>
 
- 
-
 <script>
 
-const EMOJI = {
+const canvas=document.getElementById('c');
 
-  "빨간색":"&#128308;","주황색":"&#128992;","노란색":"&#128993;",
+const ctx=canvas.getContext('2d');
 
-  "초록색":"&#128994;","파란색":"&#128309;","보라색":"&#128995;",
+canvas.width=window.innerWidth;canvas.height=window.innerHeight;
 
-  "흰색":"&#9898;","검은색":"&#9899;","회색":"&#128444;",
+const particles=[];
 
-  "갈색":"&#129321;","분홍색":"&#10084;","하늘색":"&#128307;",
+const cols=['#FF4444','#FF8C00','#FFD700','#44BB44','#4488FF','#9966FF','#FF88BB','#66CCFF'];
 
-  "대기 중...":"&#128065;","알 수 없는 색":"&#10067;"
+for(let i=0;i<60;i++){
 
-};
+  particles.push({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:2+Math.random()*4,
+
+  c:cols[Math.floor(Math.random()*cols.length)],vx:(Math.random()-.5)*.4,vy:(Math.random()-.5)*.4,a:Math.random()});
+
+}
+
+function drawParticles(){
+
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  particles.forEach(p=>{
+
+    p.x+=p.vx;p.y+=p.vy;p.a+=0.01;
+
+    if(p.x<0)p.x=canvas.width;if(p.x>canvas.width)p.x=0;
+
+    if(p.y<0)p.y=canvas.height;if(p.y>canvas.height)p.y=0;
+
+    ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+
+    ctx.fillStyle=p.c;ctx.globalAlpha=0.15+0.1*Math.sin(p.a);ctx.fill();
+
+  });
+
+  ctx.globalAlpha=1;
+
+  requestAnimationFrame(drawParticles);
+
+}
+
+drawParticles();
 
  
 
-let lastColor = "";
+function textColor(hex){
 
- 
+  const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
 
-function burst(hex) {
-
-  const p = document.getElementById("particles");
-
-  for (let i = 0; i < 24; i++) {
-
-    const el = document.createElement("div");
-
-    el.className = "particle";
-
-    const size = 8 + Math.random() * 14;
-
-    const angle = Math.random() * 360;
-
-    const dist = 80 + Math.random() * 180;
-
-    const tx = Math.cos(angle * Math.PI/180) * dist;
-
-    const ty = Math.sin(angle * Math.PI/180) * dist;
-
-    el.style.cssText = [
-
-      "width:"+size+"px","height:"+size+"px",
-
-      "background:"+hex,
-
-      "left:50%","top:50%",
-
-      "--tx:"+tx+"px","--ty:"+ty+"px",
-
-      "animation-delay:"+(Math.random()*0.2)+"s"
-
-    ].join(";");
-
-    p.appendChild(el);
-
-    setTimeout(() => el.remove(), 1000);
-
-  }
+  return(r*299+g*587+b*114)/1000>150?'#222':'#fff';
 
 }
 
  
 
-function blobUpdate(hex) {
+let prev='';
 
-  document.querySelector(".blob1").style.background = hex;
+async function poll(){
 
-}
+  try{
 
- 
+    const res=await fetch('/color',{signal:AbortSignal.timeout(1000)});
 
-async function poll() {
+    const d=await res.json();
 
-  try {
+    if(d.hex!==prev){
 
-    const r = await fetch("/data");
+      prev=d.hex;
 
-    const d = await r.json();
+      document.getElementById('circle').style.background=d.hex;
 
-    const orb  = document.getElementById("orb");
+      document.getElementById('ring').style.borderColor=d.hex;
 
-    const ring = document.getElementById("ring");
+      document.getElementById('name').textContent=d.name;
 
-    const nm   = document.getElementById("name");
+      document.getElementById('name').style.color=d.hex==='#EEEEEE'?'#aaa':d.hex;
 
-    const hx   = document.getElementById("hex");
+      document.getElementById('en').textContent=d.en;
 
- 
+      const b=document.getElementById('badge');
 
-    if (d.name !== lastColor) {
-
-      lastColor = d.name;
-
-      orb.style.setProperty("--c", d.color);
-
-      ring.style.setProperty("--c", d.color);
-
-      orb.innerHTML = EMOJI[d.name] || "&#10067;";
-
-      nm.textContent = d.name;
-
-      hx.textContent = d.color.toUpperCase();
-
-      burst(d.color);
-
-      blobUpdate(d.color);
+      b.style.background=d.hex;b.style.color=textColor(d.hex);b.textContent=d.hex;
 
     }
 
-  } catch(e) {}
+  }catch(e){}
 
-  setTimeout(poll, 400);
+  setTimeout(poll,400);
 
 }
 
@@ -744,127 +364,29 @@ poll();
 
 </body>
 
-</html>
-
-"""
+</html>"""
 
  
 
-JSON_HEADER = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n"
+# 소켓 서버
+
+s = socket.socket()
+
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+s.bind(('0.0.0.0', 80))
+
+s.listen(5)
+
+s.setblocking(False)
+
+print("서버 시작!")
 
  
 
- 
+current = {"name": "대기 중...", "en": "Waiting", "hex": "#888888"}
 
-# ── 웹 서버 ────────────────────────────────────
-
-def handle_request(conn):
-
-    try:
-
-        req = conn.recv(512).decode("utf-8", "ignore")
-
-    except:
-
-        conn.close()
-
-        return
-
- 
-
-    if "GET /data" in req:
-
-        body = json.dumps({
-
-            "name":  state["name"],
-
-            "color": state["color"],
-
-            "id":    state["id"],
-
-        })
-
-        conn.send(JSON_HEADER + body)
-
-    else:
-
-        conn.send(HTML)
-
-    conn.close()
-
- 
-
- 
-
-# ── 메인 ───────────────────────────────────────
-
-print("========================================")
-
-print("   색맹/색약 보조 색상 인식기 (웹 서버)")
-
-print("========================================")
-
- 
-
-print("HuskyLens 연결 확인 중...")
-
-hl_ok = False
-
-for i in range(5):
-
-    if handshake():
-
-        hl_ok = True
-
-        print("HuskyLens 연결 성공!")
-
-        break
-
-    print("재시도 " + str(i+1) + "/5...")
-
-    time.sleep_ms(500)
-
- 
-
-if not hl_ok:
-
-    print("HuskyLens 연결 실패! 배선을 확인하세요.")
-
- 
-
-ip = connect_wifi()
-
-if ip is None:
-
-    print("Wi-Fi 없이는 웹 서버를 시작할 수 없어요.")
-
-    raise SystemExit
-
- 
-
-addr = socket.getaddrinfo("0.0.0.0", 80)[0][-1]
-
-srv  = socket.socket()
-
-srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-srv.bind(addr)
-
-srv.listen(2)
-
-srv.setblocking(False)
-
- 
-
-print("\n브라우저에서 http://" + ip + " 접속!")
-
-print("색상 감지 시작\n")
-
- 
-
-prev_name     = ""
-
-candidate     = None
+candidate = None
 
 candidate_cnt = 0
 
@@ -872,68 +394,66 @@ candidate_cnt = 0
 
 while True:
 
-    # ── HuskyLens 읽기 ──
+    # HuskyLens 폴링
 
-    if hl_ok:
+    cid = get_dominant_id()
 
-        cid = get_dominant_id()
-
-        if cid is None:
-
-            name, color = "대기 중...", "#888888"
-
-        else:
-
-            name, color = get_name_color(cid)
-
-    else:
-
-        name, color, cid = "HuskyLens 없음", "#888888", 0
-
- 
-
-    # 안정화 필터
-
-    if name == candidate:
+    if cid == candidate:
 
         candidate_cnt += 1
 
     else:
 
-        candidate     = name
+        candidate = cid
 
         candidate_cnt = 1
 
- 
+    if candidate_cnt >= STABLE_COUNT:
 
-    if candidate_cnt >= STABLE_COUNT and candidate != prev_name:
+        if candidate is None:
 
-        state["name"]  = candidate
+            current = {"name": "없음", "en": "None", "hex": "#888888"}
 
-        state["color"] = color
+        else:
 
-        state["id"]    = cid if cid else 0
-
-        prev_name = candidate
-
-        print("[감지]", candidate, color)
+            current = get_info(candidate)
 
  
 
-    # ── 웹 요청 처리 ──
+    # HTTP 요청 처리
 
     try:
 
-        conn, _ = srv.accept()
+        conn, _ = s.accept()
 
-        conn.setblocking(True)
+        conn.settimeout(1.0)
 
-        handle_request(conn)
+        try:
 
-    except OSError:
+            req = conn.recv(512).decode('utf-8', 'ignore')
+
+        except:
+
+            req = ''
+
+ 
+
+        if 'GET /color' in req:
+
+            body = '{"name":"' + current["name"] + '","en":"' + current["en"] + '","hex":"' + current["hex"] + '"}'
+
+            conn.send(b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n' + body.encode())
+
+        else:
+
+            conn.send(b'HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n' + HTML.encode())
+
+        conn.close()
+
+    except:
 
         pass
 
  
 
-    time.sleep_ms(200)
+    time.sleep_ms(50)

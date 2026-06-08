@@ -10,7 +10,7 @@ WIFI_PASS  = "sudo25sky@"
 i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=50000)
 HL_ADDR      = 0x32
 MIN_AREA     = 100
-STABLE_COUNT = 3
+STABLE_COUNT = 1  # ✅ 수정!
 TOP_N        = 3
 
 COLOR_MAP = {
@@ -53,7 +53,7 @@ def get_top_colors():
                     length = r[idx+3]
                     if length >= 5 and idx + 5 + length <= len(r):
                         d   = r[idx+5: idx+5+length]
-                        cid = d[2]  # ✅ 수정된 위치!
+                        cid = d[2]
                         w   = d[4] | (d[5] << 8)
                         area = w * 10
                         if area >= MIN_AREA and 1 <= cid <= 50:

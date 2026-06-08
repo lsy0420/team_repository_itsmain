@@ -1,3 +1,8 @@
+# =============================================
+#  색맹/색약 보조 색상 인식기 v5.0
+#  HuskyLens (Color Recognition) + Pico W
+# =============================================
+
 import network
 import socket
 import time
@@ -7,7 +12,8 @@ from machine import I2C, Pin
 WIFI_SSID = "senWiFi_Free_sky"
 WIFI_PASS  = "sudo25sky@"
 
-i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=100000)
+# ✅ freq 50000으로 변경!
+i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=50000)
 HL_ADDR      = 0x32
 MIN_AREA     = 800
 STABLE_COUNT = 3
@@ -41,11 +47,10 @@ def make_packet(cmd, data=None):
     return bytes(body)
 
 def get_top_colors():
-    # 최대 3번 재시도
     for attempt in range(3):
         try:
             i2c.writeto(HL_ADDR, make_packet(0x20))
-            time.sleep_ms(80)
+            time.sleep_ms(200)  # ✅ 대기시간도 200ms
             r = list(i2c.readfrom(HL_ADDR, 64))
             scores = {}
             idx = 0
@@ -63,10 +68,9 @@ def get_top_colors():
                     idx += 5 + length + 1
                 else:
                     idx += 1
-            # 성공하면 바로 반환
             return sorted(scores, key=lambda k: scores[k], reverse=True)[:TOP_N]
         except Exception as e:
-            time.sleep_ms(50)
+            time.sleep_ms(100)
     return []
 
 def build_json(stable_ids):
@@ -302,12 +306,11 @@ print("http://" + ip)
 HTML_BYTES = HTML.encode('utf-8')
 print("HTML 크기:", len(HTML_BYTES), "bytes")
 
-# ── 서버 non-blocking으로 변경! ───────────────
 srv = socket.socket()
 srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 srv.bind(('0.0.0.0', 80))
 srv.listen(3)
-srv.setblocking(False)  # ← non-blocking 으로 변경!
+srv.setblocking(False)
 print("서버 OK - http://" + ip)
 
 stable   = [None] * TOP_N
@@ -315,7 +318,6 @@ cand     = [None] * TOP_N
 cand_cnt = [0]    * TOP_N
 
 while True:
-    # ── HuskyLens 읽기 (매 루프마다) ─────────
     top_ids = get_top_colors()
     for i in range(TOP_N):
         nid = top_ids[i] if i < len(top_ids) else None
@@ -327,7 +329,6 @@ while True:
         if cand_cnt[i] >= STABLE_COUNT:
             stable[i] = cand[i]
 
-    # ── HTTP 처리 ─────────────────────────────
     try:
         conn, addr = srv.accept()
         conn.settimeout(2.0)
@@ -361,4 +362,4 @@ while True:
     except Exception as e:
         print("일반 오류:", e)
 
-    time.sleep_ms(20)  # ← 20ms로 줄여서 I2C 더 자주 읽기
+    time.sleep_ms(20)

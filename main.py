@@ -49,13 +49,15 @@ def read_colors():
         idx = 0
         while idx < len(r) - 5:
             if r[idx] == 0x55 and r[idx+1] == 0xAA:
-                length = r[idx+3]
-                if length >= 5 and idx + 5 + length <= len(r):
+                length   = r[idx+3]
+                cmd_byte = r[idx+4]
+                if cmd_byte == 0x2a and idx + 5 + length <= len(r):
                     d    = r[idx+5: idx+5+length]
-                    cid  = d[2]
                     w    = d[4] | (d[5] << 8)
-                    area = w * 10
-                    if area >= 100 and 1 <= cid <= 50:
+                    h    = d[6] | (d[7] << 8)
+                    cid  = d[8] | (d[9] << 8)
+                    area = w * h
+                    if area >= 500 and 1 <= cid <= 50:
                         scores[cid] = scores.get(cid, 0) + area
                 idx += 5 + length + 1
             else:
@@ -224,7 +226,7 @@ while True:
                 'Content-Length: ' + str(len(body)) + '\r\n'
                 'Connection: close\r\n\r\n'
             ).encode() + body
-            conn.sendall(resp)  # ✅ 한번에 전송
+            conn.sendall(resp)
         else:
             resp = (
                 'HTTP/1.1 200 OK\r\n'
@@ -232,7 +234,7 @@ while True:
                 'Content-Length: ' + str(len(HTML_BYTES)) + '\r\n'
                 'Connection: close\r\n\r\n'
             ).encode() + HTML_BYTES
-            conn.sendall(resp)  # ✅ 한번에 전송
+            conn.sendall(resp)
         conn.close()
 
     except OSError as e:

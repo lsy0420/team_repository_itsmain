@@ -1,8 +1,3 @@
-# =============================================
-#  색맹/색약 보조 색상 인식기 v5.0
-#  HuskyLens (Color Recognition) + Pico W
-# =============================================
-
 import network
 import socket
 import time
@@ -12,10 +7,9 @@ from machine import I2C, Pin
 WIFI_SSID = "senWiFi_Free_sky"
 WIFI_PASS  = "sudo25sky@"
 
-# ✅ freq 50000으로 변경!
 i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=50000)
 HL_ADDR      = 0x32
-MIN_AREA     = 800
+MIN_AREA     = 100
 STABLE_COUNT = 3
 TOP_N        = 3
 
@@ -50,19 +44,18 @@ def get_top_colors():
     for attempt in range(3):
         try:
             i2c.writeto(HL_ADDR, make_packet(0x20))
-            time.sleep_ms(200)  # ✅ 대기시간도 200ms
+            time.sleep_ms(500)
             r = list(i2c.readfrom(HL_ADDR, 64))
             scores = {}
             idx = 0
             while idx < len(r) - 5:
                 if r[idx] == 0x55 and r[idx+1] == 0xAA:
                     length = r[idx+3]
-                    if length >= 8 and idx + 5 + length <= len(r):
-                        d    = r[idx+5: idx+5+length]
-                        w    = d[4] | (d[5] << 8)
-                        h    = d[6] | (d[7] << 8)
-                        cid  = d[length-2] | (d[length-1] << 8)
-                        area = w * h
+                    if length >= 5 and idx + 5 + length <= len(r):
+                        d   = r[idx+5: idx+5+length]
+                        cid = d[2]  # ✅ 수정된 위치!
+                        w   = d[4] | (d[5] << 8)
+                        area = w * 10
                         if area >= MIN_AREA and 1 <= cid <= 50:
                             scores[cid] = scores.get(cid, 0) + area
                     idx += 5 + length + 1
@@ -70,7 +63,11 @@ def get_top_colors():
                     idx += 1
             return sorted(scores, key=lambda k: scores[k], reverse=True)[:TOP_N]
         except Exception as e:
-            time.sleep_ms(100)
+            time.sleep_ms(200)
+            try:
+                i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=50000)
+            except:
+                pass
     return []
 
 def build_json(stable_ids):
@@ -289,7 +286,6 @@ poll();
 </body>
 </html>"""
 
-# ── WiFi ───────────────────────────────────────
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
 wlan.connect(WIFI_SSID, WIFI_PASS)
@@ -304,7 +300,6 @@ ip = wlan.ifconfig()[0]
 print("http://" + ip)
 
 HTML_BYTES = HTML.encode('utf-8')
-print("HTML 크기:", len(HTML_BYTES), "bytes")
 
 srv = socket.socket()
 srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

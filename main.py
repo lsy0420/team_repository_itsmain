@@ -8,10 +8,8 @@ WIFI_SSID = "senWiFi_Free_sky"
 WIFI_PASS  = "sudo25sky@"
 
 i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=50000)
-HL_ADDR      = 0x32
-MIN_AREA     = 100
-STABLE_COUNT = 1
-TOP_N        = 3
+HL_ADDR = 0x32
+TOP_N   = 3
 
 COLOR_MAP = {
     1:  {"name": "빨간색", "en": "Red",      "hex": "#FF4444", "sym": "RED"},
@@ -29,6 +27,9 @@ COLOR_MAP = {
 }
 NONE_C = {"name": "없음", "en": "None", "hex": "#CCCCCC", "sym": "?"}
 
+# ✅ 전역 캐시
+cached_json = '{"top":[{"name":"없음","en":"None","hex":"#CCCCCC","sym":"?"},{"name":"없음","en":"None","hex":"#CCCCCC","sym":"?"},{"name":"없음","en":"None","hex":"#CCCCCC","sym":"?"}]}'
+
 def get_info(cid):
     return COLOR_MAP.get(cid, {"name": "모름", "en": "Unknown", "hex": "#CCCCCC", "sym": "?"})
 
@@ -39,60 +40,50 @@ def make_packet(cmd, data=None):
     body.append(sum(body) & 0xFF)
     return bytes(body)
 
-def get_top_colors():
-    global i2c
-    for attempt in range(3):
-        try:
-            i2c.writeto(HL_ADDR, make_packet(0x20))
-            time.sleep_ms(500)
-            r = list(i2c.readfrom(HL_ADDR, 64))
-            scores = {}
-            idx = 0
-            while idx < len(r) - 5:
-                if r[idx] == 0x55 and r[idx+1] == 0xAA:
-                    length = r[idx+3]
-                    if length >= 5 and idx + 5 + length <= len(r):
-                        d   = r[idx+5: idx+5+length]
-                        cid = d[2]
-                        w   = d[4] | (d[5] << 8)
-                        area = w * 10
-                        print("읽힘! cid=%d area=%d" % (cid, area))  # ✅ 디버그
-                        if area >= MIN_AREA and 1 <= cid <= 50:
-                            scores[cid] = scores.get(cid, 0) + area
-                    idx += 5 + length + 1
-                else:
-                    idx += 1
-            result = sorted(scores, key=lambda k: scores[k], reverse=True)[:TOP_N]
-            print("결과:", result)  # ✅ 디버그
-            return result
-        except Exception as e:
-            print("I2C 오류:", e)
-            time.sleep_ms(200)
-            try:
-                i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=50000)
-            except:
-                pass
-    return []
+def read_colors():
+    global i2c, cached_json
+    try:
+        i2c.writeto(HL_ADDR, make_packet(0x20))
+        time.sleep_ms(300)
+        r = list(i2c.readfrom(HL_ADDR, 64))
+        scores = {}
+        idx = 0
+        while idx < len(r) - 5:
+            if r[idx] == 0x55 and r[idx+1] == 0xAA:
+                length = r[idx+3]
+                if length >= 5 and idx + 5 + length <= len(r):
+                    d    = r[idx+5: idx+5+length]
+                    cid  = d[2]
+                    w    = d[4] | (d[5] << 8)
+                    area = w * 10
+                    if area >= 100 and 1 <= cid <= 50:
+                        scores[cid] = scores.get(cid, 0) + area
+                idx += 5 + length + 1
+            else:
+                idx += 1
 
-def build_json(stable_ids):
-    items = []
-    for i in range(TOP_N):
-        cid = stable_ids[i] if i < len(stable_ids) else None
-        c   = get_info(cid) if cid else NONE_C
-        items.append(
-            '{"name":"' + c["name"] +
-            '","en":"'  + c["en"]   +
-            '","hex":"' + c["hex"]  +
-            '","sym":"' + c["sym"]  + '"}'
-        )
-    return '{"top":[' + ','.join(items) + ']}'
+        top = sorted(scores, key=lambda k: scores[k], reverse=True)[:TOP_N]
+        print("감지:", top)
+
+        # ✅ JSON 즉시 업데이트
+        items = []
+        for i in range(TOP_N):
+            c = get_info(top[i]) if i < len(top) else NONE_C
+            items.append('{"name":"'+c["name"]+'","en":"'+c["en"]+'","hex":"'+c["hex"]+'","sym":"'+c["sym"]+'"}')
+        cached_json = '{"top":[' + ','.join(items) + ']}'
+
+    except Exception as e:
+        print("I2C 오류:", e)
+        try:
+            i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=50000)
+        except:
+            pass
 
 def send_all(conn, data: bytes):
-    CHUNK = 512
     mv = memoryview(data)
-    for i in range(0, len(data), CHUNK):
+    for i in range(0, len(data), 512):
         try:
-            conn.send(mv[i:i+CHUNK])
+            conn.send(mv[i:i+512])
         except:
             break
         time.sleep_ms(5)
@@ -113,90 +104,28 @@ body{
   align-items:center;justify-content:center;
   gap:18px;overflow:hidden;
 }
-.bubble{
-  position:fixed;border-radius:50%;pointer-events:none;
-  animation:rise linear infinite;
-}
-@keyframes rise{
-  0%{transform:translateY(110vh);opacity:.25}
-  100%{transform:translateY(-20vh);opacity:0}
-}
-.title{
-  font-size:24px;font-weight:900;letter-spacing:2px;
-  color:#ff6eb4;
-  animation:hue 5s linear infinite;
-  position:relative;z-index:2;
-}
+.bubble{position:fixed;border-radius:50%;pointer-events:none;animation:rise linear infinite;}
+@keyframes rise{0%{transform:translateY(110vh);opacity:.25}100%{transform:translateY(-20vh);opacity:0}}
+.title{font-size:24px;font-weight:900;letter-spacing:2px;color:#ff6eb4;animation:hue 5s linear infinite;position:relative;z-index:2;}
 @keyframes hue{to{filter:hue-rotate(360deg)}}
-.main-card{
-  background:rgba(255,255,255,0.80);
-  border:3px solid #ddd;
-  border-radius:34px;padding:32px 44px 26px;
-  text-align:center;width:300px;
-  box-shadow:0 8px 32px rgba(0,0,0,.08);
-  transition:border-color .5s,box-shadow .5s;
-  position:relative;z-index:2;
-}
+.main-card{background:rgba(255,255,255,0.80);border:3px solid #ddd;border-radius:34px;padding:32px 44px 26px;text-align:center;width:300px;box-shadow:0 8px 32px rgba(0,0,0,.08);transition:border-color .5s,box-shadow .5s;position:relative;z-index:2;}
 .ring-wrap{position:relative;width:150px;margin:0 auto 16px}
-.pulse{
-  position:absolute;inset:-14px;border-radius:50%;
-  border:3px solid #ddd;
-  animation:pls 2.2s ease-out infinite;opacity:0;
-}
+.pulse{position:absolute;inset:-14px;border-radius:50%;border:3px solid #ddd;animation:pls 2.2s ease-out infinite;opacity:0;}
 .pulse2{animation-delay:.9s}
 @keyframes pls{0%{transform:scale(1);opacity:.6}100%{transform:scale(1.5);opacity:0}}
-.main-circle{
-  width:150px;height:150px;border-radius:50%;
-  background:#ddd;
-  display:flex;align-items:center;justify-content:center;
-  font-size:22px;font-weight:900;color:#fff;
-  letter-spacing:1px;
-  box-shadow:0 0 0 5px rgba(255,255,255,.9),0 6px 24px #ddd;
-  animation:fl 3s ease-in-out infinite;
-  transition:background .5s,box-shadow .5s;
-}
+.main-circle{width:150px;height:150px;border-radius:50%;background:#ddd;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:900;color:#fff;letter-spacing:1px;box-shadow:0 0 0 5px rgba(255,255,255,.9),0 6px 24px #ddd;animation:fl 3s ease-in-out infinite;transition:background .5s,box-shadow .5s;}
 @keyframes fl{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
-.main-name{
-  font-size:32px;font-weight:900;color:#bbb;
-  transition:all .5s;margin-bottom:4px;
-}
+.main-name{font-size:32px;font-weight:900;color:#bbb;transition:all .5s;margin-bottom:4px;}
 .main-en{font-size:13px;color:#bbb;margin-bottom:12px}
-.hex-badge{
-  display:inline-block;padding:7px 22px;
-  border-radius:999px;font-size:13px;font-weight:700;
-  background:#ddd;color:#fff;transition:all .5s;
-}
+.hex-badge{display:inline-block;padding:7px 22px;border-radius:999px;font-size:13px;font-weight:700;background:#ddd;color:#fff;transition:all .5s;}
 .sub-row{display:flex;gap:12px;position:relative;z-index:2}
-.sub-card{
-  background:rgba(255,255,255,0.78);
-  border:2px solid #eee;border-radius:22px;
-  padding:14px 16px;text-align:center;width:138px;
-  box-shadow:0 4px 16px rgba(0,0,0,.06);transition:all .5s;
-}
+.sub-card{background:rgba(255,255,255,0.78);border:2px solid #eee;border-radius:22px;padding:14px 16px;text-align:center;width:138px;box-shadow:0 4px 16px rgba(0,0,0,.06);transition:all .5s;}
 .sub-rank{font-size:11px;color:#ccc;letter-spacing:1px;margin-bottom:8px;font-weight:700}
-.sub-circle{
-  width:58px;height:58px;border-radius:50%;background:#ddd;
-  display:flex;align-items:center;justify-content:center;
-  font-size:13px;font-weight:900;color:#fff;
-  box-shadow:0 0 0 3px rgba(255,255,255,.9),0 3px 12px #ddd;
-  margin:0 auto 8px;animation:fl 3.6s ease-in-out infinite;
-  transition:background .5s,box-shadow .5s;
-}
+.sub-circle{width:58px;height:58px;border-radius:50%;background:#ddd;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;color:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.9),0 3px 12px #ddd;margin:0 auto 8px;animation:fl 3.6s ease-in-out infinite;transition:background .5s,box-shadow .5s;}
 .sub-name{font-size:14px;font-weight:800;color:#555;margin-bottom:2px}
 .sub-en{font-size:11px;color:#bbb;margin-bottom:6px}
-.sub-hex{
-  font-size:11px;font-weight:700;padding:3px 10px;
-  border-radius:999px;background:#ddd;color:#fff;
-  transition:all .5s;display:inline-block;
-}
-.status-bar{
-  font-size:12px;color:#bbb;
-  display:flex;align-items:center;gap:6px;
-  background:rgba(255,255,255,.8);
-  padding:6px 16px;border-radius:999px;
-  box-shadow:0 2px 10px rgba(0,0,0,.05);
-  position:relative;z-index:2;
-}
+.sub-hex{font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;background:#ddd;color:#fff;transition:all .5s;display:inline-block;}
+.status-bar{font-size:12px;color:#bbb;display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.8);padding:6px 16px;border-radius:999px;box-shadow:0 2px 10px rgba(0,0,0,.05);position:relative;z-index:2;}
 .dot{width:8px;height:8px;border-radius:50%;background:#69db7c;animation:blink 1.5s ease infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.1}}
 </style>
@@ -233,57 +162,41 @@ body{
 <script>
 const BC=['#ffadad','#ffd6a5','#fdffb6','#caffbf','#9bf6ff','#a0c4ff','#bdb2ff','#ffc6ff'];
 for(let i=0;i<14;i++){
-  const b=document.createElement('div');
-  b.className='bubble';
+  const b=document.createElement('div');b.className='bubble';
   const sz=30+Math.random()*100;
   b.style.cssText='width:'+sz+'px;height:'+sz+'px;left:'+(Math.random()*100)+'vw;bottom:'+(-sz)+'px;background:'+BC[i%BC.length]+';opacity:.22;animation-duration:'+(10+Math.random()*12)+'s;animation-delay:'+(Math.random()*8)+'s';
   document.body.appendChild(b);
 }
-function tc(h){
-  const r=parseInt(h.slice(1,3),16),g=parseInt(h.slice(3,5),16),b=parseInt(h.slice(5,7),16);
-  return(r*299+g*587+b*114)/1000>160?'#444':'#fff';
-}
+function tc(h){const r=parseInt(h.slice(1,3),16),g=parseInt(h.slice(3,5),16),b=parseInt(h.slice(5,7),16);return(r*299+g*587+b*114)/1000>160?'#444':'#fff';}
 function upMain(d){
   const mc=document.getElementById('MC');
-  mc.style.borderColor=d.hex;
-  mc.style.boxShadow='0 8px 32px '+d.hex+'44';
+  mc.style.borderColor=d.hex;mc.style.boxShadow='0 8px 32px '+d.hex+'44';
   document.getElementById('R1').style.borderColor=d.hex;
   document.getElementById('R2').style.borderColor=d.hex;
   const cc=document.getElementById('CC');
-  cc.style.background=d.hex;
-  cc.style.boxShadow='0 0 0 5px rgba(255,255,255,.9),0 6px 24px '+d.hex+'88';
-  cc.textContent=d.sym;
-  const mn=document.getElementById('MN');
-  mn.textContent=d.name;mn.style.color=d.hex;
+  cc.style.background=d.hex;cc.style.boxShadow='0 0 0 5px rgba(255,255,255,.9),0 6px 24px '+d.hex+'88';cc.textContent=d.sym;
+  const mn=document.getElementById('MN');mn.textContent=d.name;mn.style.color=d.hex;
   document.getElementById('ME').textContent=d.en;
-  const mb=document.getElementById('MB');
-  mb.textContent=d.hex;mb.style.background=d.hex;mb.style.color=tc(d.hex);
+  const mb=document.getElementById('MB');mb.textContent=d.hex;mb.style.background=d.hex;mb.style.color=tc(d.hex);
 }
 function upSub(n,d){
-  const sd=document.getElementById('S'+n);
-  const sc=document.getElementById('S'+n+'C');
-  const sn=document.getElementById('S'+n+'N');
-  const se=document.getElementById('S'+n+'E');
-  const sh=document.getElementById('S'+n+'H');
-  sd.style.borderColor=d.hex+'99';
-  sc.style.background=d.hex;
-  sc.style.boxShadow='0 0 0 3px rgba(255,255,255,.9),0 3px 12px '+d.hex+'88';
-  sc.textContent=d.sym;
-  sn.textContent=d.name;
-  se.textContent=d.en;
-  sh.textContent=d.hex;sh.style.background=d.hex;sh.style.color=tc(d.hex);
+  document.getElementById('S'+n).style.borderColor=d.hex+'99';
+  const sc=document.getElementById('S'+n+'C');sc.style.background=d.hex;sc.style.boxShadow='0 0 0 3px rgba(255,255,255,.9),0 3px 12px '+d.hex+'88';sc.textContent=d.sym;
+  document.getElementById('S'+n+'N').textContent=d.name;
+  document.getElementById('S'+n+'E').textContent=d.en;
+  const sh=document.getElementById('S'+n+'H');sh.textContent=d.hex;sh.style.background=d.hex;sh.style.color=tc(d.hex);
 }
 const NL={name:'None',en:'None',hex:'#CCCCCC',sym:'?'};
 let pj='';
 async function poll(){
   try{
-    const r=await fetch('/color',{signal:AbortSignal.timeout(2000)});
+    const r=await fetch('/color',{signal:AbortSignal.timeout(3000)});
     if(!r.ok)throw new Error(r.status);
     const d=await r.json();
     const j=JSON.stringify(d);
     if(j!==pj){pj=j;upMain(d.top[0]||NL);upSub(1,d.top[1]||NL);upSub(2,d.top[2]||NL);}
   }catch(e){console.warn(e);}
-  setTimeout(poll,450);
+  setTimeout(poll,500);
 }
 poll();
 </script>
@@ -312,33 +225,20 @@ srv.listen(3)
 srv.setblocking(False)
 print("서버 OK - http://" + ip)
 
-stable   = [None] * TOP_N
-cand     = [None] * TOP_N
-cand_cnt = [0]    * TOP_N
+last_read = 0
 
 while True:
-    top_ids = get_top_colors()
-    print("stable:", stable)  # ✅ 디버그
-    for i in range(TOP_N):
-        nid = top_ids[i] if i < len(top_ids) else None
-        if nid == cand[i]:
-            cand_cnt[i] += 1
-        else:
-            cand[i] = nid
-            cand_cnt[i] = 1
-        if cand_cnt[i] >= STABLE_COUNT:
-            stable[i] = cand[i]
-
+    # ✅ 웹 요청 먼저 처리
     try:
         conn, addr = srv.accept()
-        conn.settimeout(2.0)
+        conn.settimeout(1.0)
         try:
             req = conn.recv(256).decode('utf-8', 'ignore')
         except:
             req = ''
 
         if 'GET /color' in req:
-            body = build_json(stable).encode('utf-8')
+            body = cached_json.encode('utf-8')
             hdr = (
                 'HTTP/1.1 200 OK\r\n'
                 'Content-Type: application/json; charset=utf-8\r\n'
@@ -360,6 +260,12 @@ while True:
         if e.args[0] != errno.EAGAIN:
             print("소켓 오류:", e)
     except Exception as e:
-        print("일반 오류:", e)
+        print("오류:", e)
 
-    time.sleep_ms(20)
+    # ✅ 1초마다 I2C 읽기
+    now = time.ticks_ms()
+    if time.ticks_diff(now, last_read) >= 1000:
+        read_colors()
+        last_read = now
+
+    time.sleep_ms(10)

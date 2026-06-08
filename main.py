@@ -27,7 +27,6 @@ COLOR_MAP = {
 }
 NONE_C = {"name": "없음", "en": "None", "hex": "#CCCCCC", "sym": "?"}
 
-# ✅ 전역 캐시
 cached_json = '{"top":[{"name":"없음","en":"None","hex":"#CCCCCC","sym":"?"},{"name":"없음","en":"None","hex":"#CCCCCC","sym":"?"},{"name":"없음","en":"None","hex":"#CCCCCC","sym":"?"}]}'
 
 def get_info(cid):
@@ -65,7 +64,6 @@ def read_colors():
         top = sorted(scores, key=lambda k: scores[k], reverse=True)[:TOP_N]
         print("감지:", top)
 
-        # ✅ JSON 즉시 업데이트
         items = []
         for i in range(TOP_N):
             c = get_info(top[i]) if i < len(top) else NONE_C
@@ -79,15 +77,6 @@ def read_colors():
         except:
             pass
 
-def send_all(conn, data: bytes):
-    mv = memoryview(data)
-    for i in range(0, len(data), 512):
-        try:
-            conn.send(mv[i:i+512])
-        except:
-            break
-        time.sleep_ms(5)
-
 HTML = """<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -96,14 +85,7 @@ HTML = """<!DOCTYPE html>
 <title>Color Detector</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{
-  font-family:system-ui,sans-serif;
-  min-height:100vh;
-  background:linear-gradient(135deg,#fff0f9,#f0f4ff,#f0fff8,#fffbf0);
-  display:flex;flex-direction:column;
-  align-items:center;justify-content:center;
-  gap:18px;overflow:hidden;
-}
+body{font-family:system-ui,sans-serif;min-height:100vh;background:linear-gradient(135deg,#fff0f9,#f0f4ff,#f0fff8,#fffbf0);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;overflow:hidden;}
 .bubble{position:fixed;border-radius:50%;pointer-events:none;animation:rise linear infinite;}
 @keyframes rise{0%{transform:translateY(110vh);opacity:.25}100%{transform:translateY(-20vh);opacity:0}}
 .title{font-size:24px;font-weight:900;letter-spacing:2px;color:#ff6eb4;animation:hue 5s linear infinite;position:relative;z-index:2;}
@@ -169,12 +151,9 @@ for(let i=0;i<14;i++){
 }
 function tc(h){const r=parseInt(h.slice(1,3),16),g=parseInt(h.slice(3,5),16),b=parseInt(h.slice(5,7),16);return(r*299+g*587+b*114)/1000>160?'#444':'#fff';}
 function upMain(d){
-  const mc=document.getElementById('MC');
-  mc.style.borderColor=d.hex;mc.style.boxShadow='0 8px 32px '+d.hex+'44';
-  document.getElementById('R1').style.borderColor=d.hex;
-  document.getElementById('R2').style.borderColor=d.hex;
-  const cc=document.getElementById('CC');
-  cc.style.background=d.hex;cc.style.boxShadow='0 0 0 5px rgba(255,255,255,.9),0 6px 24px '+d.hex+'88';cc.textContent=d.sym;
+  const mc=document.getElementById('MC');mc.style.borderColor=d.hex;mc.style.boxShadow='0 8px 32px '+d.hex+'44';
+  document.getElementById('R1').style.borderColor=d.hex;document.getElementById('R2').style.borderColor=d.hex;
+  const cc=document.getElementById('CC');cc.style.background=d.hex;cc.style.boxShadow='0 0 0 5px rgba(255,255,255,.9),0 6px 24px '+d.hex+'88';cc.textContent=d.sym;
   const mn=document.getElementById('MN');mn.textContent=d.name;mn.style.color=d.hex;
   document.getElementById('ME').textContent=d.en;
   const mb=document.getElementById('MB');mb.textContent=d.hex;mb.style.background=d.hex;mb.style.color=tc(d.hex);
@@ -221,48 +200,51 @@ HTML_BYTES = HTML.encode('utf-8')
 srv = socket.socket()
 srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 srv.bind(('0.0.0.0', 80))
-srv.listen(3)
+srv.listen(5)
 srv.setblocking(False)
 print("서버 OK - http://" + ip)
 
 last_read = 0
 
 while True:
-    # ✅ 웹 요청 먼저 처리
     try:
         conn, addr = srv.accept()
-        conn.settimeout(1.0)
+        conn.setblocking(True)
+        conn.settimeout(3.0)
         try:
-            req = conn.recv(256).decode('utf-8', 'ignore')
+            req = conn.recv(512).decode('utf-8', 'ignore')
         except:
             req = ''
 
         if 'GET /color' in req:
             body = cached_json.encode('utf-8')
-            hdr = (
+            resp = (
                 'HTTP/1.1 200 OK\r\n'
                 'Content-Type: application/json; charset=utf-8\r\n'
                 'Content-Length: ' + str(len(body)) + '\r\n'
                 'Connection: close\r\n\r\n'
-            ).encode()
-            send_all(conn, hdr + body)
+            ).encode() + body
+            conn.sendall(resp)  # ✅ 한번에 전송
         else:
-            hdr = (
+            resp = (
                 'HTTP/1.1 200 OK\r\n'
                 'Content-Type: text/html; charset=utf-8\r\n'
                 'Content-Length: ' + str(len(HTML_BYTES)) + '\r\n'
                 'Connection: close\r\n\r\n'
-            ).encode()
-            send_all(conn, hdr + HTML_BYTES)
+            ).encode() + HTML_BYTES
+            conn.sendall(resp)  # ✅ 한번에 전송
         conn.close()
 
     except OSError as e:
         if e.args[0] != errno.EAGAIN:
-            print("소켓 오류:", e)
+            pass
     except Exception as e:
         print("오류:", e)
+        try:
+            conn.close()
+        except:
+            pass
 
-    # ✅ 1초마다 I2C 읽기
     now = time.ticks_ms()
     if time.ticks_diff(now, last_read) >= 1000:
         read_colors()

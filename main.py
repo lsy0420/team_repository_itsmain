@@ -10,7 +10,7 @@ WIFI_PASS  = "sudo25sky@"
 i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=50000)
 HL_ADDR      = 0x32
 MIN_AREA     = 100
-STABLE_COUNT = 1  # ✅ 수정!
+STABLE_COUNT = 1
 TOP_N        = 3
 
 COLOR_MAP = {
@@ -30,8 +30,7 @@ COLOR_MAP = {
 NONE_C = {"name": "없음", "en": "None", "hex": "#CCCCCC", "sym": "?"}
 
 def get_info(cid):
-    return COLOR_MAP.get(cid, {"name": "모름", "en": "Unknown",
-                                "hex": "#CCCCCC", "sym": "?"})
+    return COLOR_MAP.get(cid, {"name": "모름", "en": "Unknown", "hex": "#CCCCCC", "sym": "?"})
 
 def make_packet(cmd, data=None):
     if data is None:
@@ -41,6 +40,7 @@ def make_packet(cmd, data=None):
     return bytes(body)
 
 def get_top_colors():
+    global i2c
     for attempt in range(3):
         try:
             i2c.writeto(HL_ADDR, make_packet(0x20))
@@ -56,13 +56,17 @@ def get_top_colors():
                         cid = d[2]
                         w   = d[4] | (d[5] << 8)
                         area = w * 10
+                        print("읽힘! cid=%d area=%d" % (cid, area))  # ✅ 디버그
                         if area >= MIN_AREA and 1 <= cid <= 50:
                             scores[cid] = scores.get(cid, 0) + area
                     idx += 5 + length + 1
                 else:
                     idx += 1
-            return sorted(scores, key=lambda k: scores[k], reverse=True)[:TOP_N]
+            result = sorted(scores, key=lambda k: scores[k], reverse=True)[:TOP_N]
+            print("결과:", result)  # ✅ 디버그
+            return result
         except Exception as e:
+            print("I2C 오류:", e)
             time.sleep_ms(200)
             try:
                 i2c = I2C(1, sda=Pin(6), scl=Pin(7), freq=50000)
@@ -314,6 +318,7 @@ cand_cnt = [0]    * TOP_N
 
 while True:
     top_ids = get_top_colors()
+    print("stable:", stable)  # ✅ 디버그
     for i in range(TOP_N):
         nid = top_ids[i] if i < len(top_ids) else None
         if nid == cand[i]:
